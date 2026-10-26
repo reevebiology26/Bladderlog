@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Teacher Bladder Bootcamp</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* Splash Screen Background */
+        .dot-bg { background-image: radial-gradient(circle at center, rgba(255,255,255,0.2) 1px, transparent 1px); background-size: 20px 20px; }
+    </style>
+</head>
+<body class="bg-gray-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            // --- STATE ---
+            const [showSplash, setShowSplash] = useState(true);
+            const [activeTab, setActiveTab] = useState('logs');
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+            
+            const [logs, setLogs] = useState([]);
+            const [drinkLogs, setDrinkLogs] = useState([]);
+            
+            // Modal States
+            const [showLogModal, setShowLogModal] = useState(false);
+            const [logTime, setLogTime] = useState('');
+            const [volume, setVolume] = useState(2); // 1: Small, 2: Medium, 3: Large
+            const [urgency, setUrgency] = useState(3); // 1-5
+            const [tags, setTags] = useState({ dribble: false, dribbleMarks: false, massage: false });
+            
+            const [celebrationMsg, setCelebrationMsg] = useState('');
+            const fileInputRef = useRef(null);
+
+            // --- INITIAL LOAD & SPLASH ---
+            useEffect(() => {
+                // Load data from local storage
+                try {
+                    const savedLogs = localStorage.getItem('tbb_logs');
+                    if (savedLogs) {
+                        const parsed = JSON.parse(savedLogs).map(l => ({...l, timestamp: new Date(l.timestamp)}));
+                        setLogs(parsed);
+                    }
+                    
+                    const savedDrinks = localStorage.getItem('tbb_drinks');
+                    if (savedDrinks) {
+                        const parsed = JSON.parse(savedDrinks).map(d => ({...d, timestamp: new Date(d.timestamp)}));
+                        setDrinkLogs(parsed);
+                    }
+                } catch (e) {
+                    console.error("Failed to parse local storage data", e);
+                }
+            }, []);
+
+            // --- AUTO SAVE ---
+            useEffect(() => {
+                if (!showSplash) {
+                    localStorage.setItem('tbb_logs', JSON.stringify(logs));
+                    localStorage.setItem('tbb_drinks', JSON.stringify(drinkLogs));
+                }
+            }, [logs, drinkLogs, showSplash]);
+
+            // --- CALCULATIONS ---
+            const getAverageInterval = () => {
+                if (logs.length < 2) return 0;
+                let totalDiff = 0;
+                let validIntervals = 0;
+                
+                // Sort ascending for calculation
+                const sorted = [...logs].sort((a, b) => a.timestamp - b.timestamp);
+                
+                for (let i = 1; i < sorted.length; i++) {
+                    const diffMs = sorted[i].timestamp - sorted[i-1].timestamp;
+                    // Ignore intervals longer than 10 hours (assuming overnight sleep)
+                    if (diffMs < 10 * 60 * 60 * 1000) {
+                        totalDiff += diffMs;
+                        validIntervals++;
+                    }
+                }
+                return validIntervals > 0 ? (totalDiff / validIntervals) : 0;
+            };
+
+            const formatDuration = (ms) => {
+                if (!ms) return "N/A";
+                const mins = Math.floor(ms / 60000);
+                const hrs = Math.floor(mins / 60);
+                const remainingMins = mins % 60;
+                if (hrs === 0) return `${remainingMins}m`;
+                return `${hrs}h ${remainingMins}m`;
+            };
+
+            // --- ACTIONS ---
+            const openLogModal = () => {
+                const now = new Date();
+                const timeString = now.toTimeString().slice(0, 5); // Format as HH:mm
+                
+                setLogTime(timeString);
+                setVolume(2);
+                setUrgency(3);
+                setTags({ dribble: false, dribbleMarks: false, massage: false });
+                setShowLogModal(true);
+            };
+
+            const saveLog = () => {
+                const now = new Date();
+                const [hours, minutes] = logTime.split(':');
+                const dateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(hours), parseInt(minutes));
+                
+                const newLog = {
+                    id: Date.now(),
+                    timestamp: dateObj,
+                    volume,
+                    urgency,
+                    tags
+                };
+
+                const currentAvg = getAverageInterval();
+                const sortedLogs = [...logs, newLog].sort((a, b) => b.timestamp - a.timestamp);
+                
+                // Check for celebration (if this interval beats average by 5 mins)
+                if (sortedLogs.length > 1 && sortedLogs[0].id === newLog.id) {
+                    const newInterval = newLog.timestamp - sortedLogs[1].timestamp;
+                    if (currentAvg > 0 && newInterval > (currentAvg + 300000) && newInterval < (10*60*60*1000)) {
+                        setCelebrationMsg("🎉 New Personal Best! You held it longer than average!");
+                        setTimeout(() => setCelebrationMsg(''), 4000);
+                    }
+                }
+
+                setLogs(sortedLogs);
+                setShowLogModal(false);
+            };
+
+            const handleLogDrink = (type) => {
+                const newDrink = { id: Date.now(), timestamp: new Date(), type };
+                setDrinkLogs(prev => [newDrink, ...prev].sort((a, b) => b.timestamp - a.timestamp));
+                setCelebrationMsg(`✅ ${type} logged!`);
+                setTimeout(() => setCelebrationMsg(''), 2000);
+            };
+
+            // --- DATA MANAGEMENT ---
+            const exportData = () => {
+                const data = JSON.stringify({ logs, drinkLogs });
+                const blob = new Blob([data], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `BladderTrackerBackup_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+            };
+
+            const importData = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const parsed = JSON.parse(event.target.result);
+                        if (parsed.logs) {
+                            setLogs(parsed.logs.map(l => ({...l, timestamp: new Date(l.timestamp)})));
+                        }
+                        if (parsed.drinkLogs) {
+                            setDrinkLogs(parsed.drinkLogs.map(d => ({...d, timestamp: new Date(d.timestamp)})));
+                        }
+                        alert("Data successfully restored!");
+                    } catch (err) {
+                        alert("Error restoring data. Make sure it's a valid backup file.");
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            // --- CALENDAR LOGIC ---
+            // Simple mock logic: audit every 14 days. 
+            const daysUntilAudit = 14 - (new Date().getDate() % 14);
+
+            // --- RENDERING ---
+            if (showSplash) {
+                return (
+                    <div 
+                        className="max-w-md mx-auto min-h-screen bg-blue-600 flex flex-col items-center justify-center text-white relative overflow-hidden dot-bg cursor-pointer"
+                        onClick={() => setShowSplash(false)}
+                    >
+                        <div className="text-7xl mb-6 animate-bounce">🚽🏃‍♂️💨</div>
+                        <h1 className="text-3xl font-black text-center mb-2 px-4 drop-shadow-md">Teacher Bladder<br/>Bootcamp</h1>
+                        <p className="text-blue-200 font-medium tracking-wide">Operation: Turing Trip</p>
+                        <div className="mt-16 text-sm text-white/80 animate-pulse font-bold tracking-widest uppercase bg-white/20 px-6 py-3 rounded-full">Tap anywhere to start</div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen bg-gray-50 flex flex-col relative shadow-xl overflow-hidden text-gray-800">
+                    
+                    {/* Celebration Toast */}
+                    {celebrationMsg && (
+                        <div className="absolute top-4 left-4 right-4 z-50 bg-green-500 text-white font-bold px-4 py-3 rounded-xl shadow-lg transform transition-all flex items-center justify-center animate-pulse">
+                            {celebrationMsg}
+                        </div>
+                    )}
+
+                    {/* SIDEBAR */}
+                    {isSidebarOpen && (
+                        <div className="absolute inset-0 z-40 flex">
+                            <div className="absolute inset-0 bg-black/50" onClick={() => setIsSidebarOpen(false)}></div>
+                            <div className="relative w-64 bg-white h-full shadow-2xl flex flex-col">
+                                <div className="p-6 bg-blue-600 text-white">
+                                    <h2 className="text-xl font-bold">Menu</h2>
+                                    <p className="text-blue-200 text-sm">{daysUntilAudit} days to next audit</p>
+                                </div>
+                                <div className="flex flex-col py-4 space-y-2 px-3 flex-1">
+                                    {[
+                                        { id: 'logs', icon: '📝', label: 'Dashboard & Logs' },
+                                        { id: 'progress', icon: '📈', label: 'Progress & Data' },
+                                        { id: 'calendar', icon: '📅', label: 'Calendar & Alerts' }
+                                    ].map(tab => (
+                                        <button 
+                                            key={tab.id}
+                                            onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
+                                            className={`flex items-center p-3 rounded-xl transition ${activeTab === tab.id ? 'bg-blue-50 text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-100'}`}
+                                        >
+                                            <span className="text-2xl mr-4">{tab.icon}</span>
+                                            {tab.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* HEADER */}
+                    <header className="bg-white px-4 py-4 flex items-center justify-between shadow-sm z-10 sticky top-0">
+                        <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-gray-500 hover:text-blue-600">
+                            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                        </button>
+                        <h1 className="text-lg font-bold text-gray-800 tracking-tight">
+                            {activeTab === 'logs' ? 'Dashboard' : activeTab === 'progress' ? 'Progress' : 'Calendar'}
+                        </h1>
+                        <div className="w-8"></div> {/* Spacer for centering */}
+                    </header>
+
+                    {/* MAIN CONTENT AREA */}
+                    <main className="flex-1 overflow-y-auto p-4 pb-12 hide-scrollbar">
+                        
+                        {/* --- LOGS TAB --- */}
+                        {activeTab === 'logs' && (
+                            <div className="space-y-6">
+                                <button 
+                                    onClick={openLogModal}
+                                    className="w-full bg-blue-600 text-white py-5 rounded-2xl shadow-lg font-bold text-xl active:scale-95 transition flex items-center justify-center space-x-2"
+                                >
+                                    <span className="text-2xl">➕</span>
+                                    <span>Log New Visit</span>
+                                </button>
+
+                                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Quick Add Drink</h3>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {[
+                                            { type: 'Water', icon: '💧', color: 'blue' },
+                                            { type: 'Tea', icon: '🫖', color: 'amber' },
+                                            { type: 'Coffee', icon: '☕', color: 'orange' },
+                                            { type: 'Decaf', icon: '🌿', color: 'emerald' },
+                                            { type: 'Moretti', icon: '🍺', color: 'yellow' },
+                                            { type: 'Double Jameson', icon: '🥃', color: 'slate' }
+                                        ].map(drink => (
+                                            <button 
+                                                key={drink.type}
+                                                onClick={() => handleLogDrink(drink.type)} 
+                                                className={`py-3 bg-${drink.color}-50 hover:bg-${drink.color}-100 border border-${drink.color}-200 text-${drink.color}-800 rounded-xl font-bold flex flex-col items-center justify-center space-y-1 active:scale-95 transition text-center px-1`}
+                                            >
+                                                <span className="text-xl">{drink.icon}</span>
+                                                <span className={drink.type === 'Double Jameson' ? 'text-[10px] leading-tight' : 'text-xs'}>{drink.type}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4 px-1">Recent Activity</h3>
+                                    {logs.length === 0 && drinkLogs.length === 0 ? (
+                                        <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">
+                                            No activity logged yet.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {[
+                                                ...logs.map(l => ({ ...l, eventType: 'visit' })),
+                                                ...drinkLogs.map(d => ({ ...d, eventType: 'drink' }))
+                                            ].sort((a, b) => b.timestamp - a.timestamp).map((event) => {
+                                                const timeStr = event.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                                
+                                                if (event.eventType === 'drink') {
+                                                    return (
+                                                        <div key={`drink-${event.id}`} className="bg-blue-50 p-3 rounded-xl shadow-sm border border-blue-100 flex justify-between items-center">
+                                                            <div className="flex items-center space-x-3">
+                                                                <div className="bg-white p-2 rounded-lg shadow-sm text-lg">
+                                                                    {event.type === 'Water' ? '💧' : event.type === 'Tea' ? '🫖' : event.type === 'Coffee' ? '☕' : event.type === 'Decaf' ? '🌿' : event.type === 'Moretti' ? '🍺' : '🥃'}
+                                                                </div>
+                                                                <span className="font-bold text-gray-700">{event.type}</span>
+                                                            </div>
+                                                            <span className="text-sm font-medium text-gray-500">{timeStr}</span>
+                                                        </div>
+                                                    );
+                                                }
+
+                                                // Calculate interval using only visits
+                                                const visitsOnly = [...logs].sort((a, b) => b.timestamp - a.timestamp);
+                                                const visitIndex = visitsOnly.findIndex(v => v.id === event.id);
+                                                const prevLog = visitsOnly[visitIndex + 1];
+                                                const interval = prevLog ? (event.timestamp - prevLog.timestamp) : null;
+                                                
+                                                return (
+                                                    <div key={`visit-${event.id}`} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div className="flex items-center space-x-2">
+                                                                <span className="text-xl">🚽</span>
+                                                                <div className="font-bold text-lg text-gray-800">{timeStr}</div>
+                                                            </div>
+                                                            <div className="text-sm font-medium bg-gray-100 px-2 py-1 rounded text-gray-600">
+                                                                {interval ? formatDuration(interval) : 'Initial'}
+                                                            </div>
+                                                        </div>
+                                                        
+                                                        <div className="flex items-center space-x-4 text-sm mb-3 ml-7">
+                                                            <div className="flex items-center space-x-1">
+                                                                <span className="text-gray-500">Urgency:</span>
+                                                                <span className={`font-bold px-2 rounded ${event.urgency >= 4 ? 'text-red-600 bg-red-50' : event.urgency === 3 ? 'text-orange-600 bg-orange-50' : 'text-green-600 bg-green-50'}`}>
+                                                                    {event.urgency}/5
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center space-x-1">
+                                                                <span className="text-gray-500">Vol:</span>
+                                                                <span className="font-semibold text-gray-700">
+                                                                    {event.volume === 1 ? 'Small' : event.volume === 2 ? 'Med' : 'Large'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        {(event.tags.dribble || event.tags.dribbleMarks || event.tags.massage) && (
+                                                            <div className="flex flex-wrap gap-2 mt-1 pt-3 border-t border-gray-50 ml-7">
+                                                                {event.tags.dribble && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-md">💧 Dribble</span>}
+                                                                {event.tags.dribbleMarks && <span className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded-md">👖 Marks Clothing</span>}
+                                                                {event.tags.massage && <span className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded-md">💆‍♂️ Massage</span>}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* --- PROGRESS TAB --- */}
+                        {activeTab === 'progress' && (
+                            <div className="space-y-6">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-white p-4 rounded-xl shadow-sm border border-blue-100">
+                                        <p className="text-xs text-blue-500 font-bold uppercase mb-1">Avg Interval</p>
+                                        <p className="text-2xl font-black text-gray-800">{formatDuration(getAverageInterval())}</p>
+                                    </div>
+                                    <div className="bg-white p-4 rounded-xl shadow-sm border border-green-100">
+                                        <p className="text-xs text-green-500 font-bold uppercase mb-1">Total Logs</p>
+                                        <p className="text-2xl font-black text-gray-800">{logs.length}</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                                    <h3 className="font-bold text-gray-800 mb-4">Data Management</h3>
+                                    <p className="text-sm text-gray-500 mb-6">Your data is saved automatically on this device. Use these buttons to create backups or transfer to a new phone.</p>
+                                    
+                                    <div className="space-y-3">
+                                        <button onClick={exportData} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-xl flex items-center justify-center">
+                                            <span className="mr-2">💾</span> Download Backup
+                                        </button>
+                                        
+                                        <div className="relative">
+                                            <input 
+                                                type="file" 
+                                                ref={fileInputRef}
+                                                onChange={importData}
+                                                accept=".json"
+                                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                            />
+                                            <button className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded-xl flex items-center justify-center">
+                                                <span className="mr-2">📂</span> Restore Data
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* --- CALENDAR TAB --- */}
+                        {activeTab === 'calendar' && (
+                            <div className="space-y-6">
+                                <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-2xl shadow-md text-white text-center">
+                                    <p className="text-blue-200 font-medium mb-1 uppercase tracking-widest text-xs">Next Audit Window</p>
+                                    <div className="text-6xl font-black mb-2">{daysUntilAudit}</div>
+                                    <p className="text-lg font-bold">Days Remaining</p>
+                                </div>
+                                
+                                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+                                    <h3 className="font-bold text-gray-800 mb-2">How Audits Work</h3>
+                                    <p className="text-sm text-gray-600 mb-4">Tracking every day causes burnout. Instead, track every single visit for 3 consecutive days (Mon, Tue, Wed) every 2 weeks.</p>
+                                    <ul className="text-sm text-gray-600 space-y-2 list-disc pl-5">
+                                        <li>Reveals interval growth over time.</li>
+                                        <li>Highlights symptom changes.</li>
+                                        <li>Proves physical therapy results.</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    {/* --- LOG MODAL OVERLAY --- */}
+                    {showLogModal && (
+                        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center">
+                            <div className="bg-white w-full max-w-md p-6 rounded-t-3xl sm:rounded-3xl max-h-[90vh] overflow-y-auto slide-up">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-xl font-black text-gray-800">Log Visit</h2>
+                                    <button onClick={() => setShowLogModal(false)} className="text-gray-400 bg-gray-100 rounded-full p-2 hover:bg-gray-200">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
+                                </div>
+
+                                <div className="space-y-6">
+                                    {/* TIME ADJUSTER */}
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-2">Time of Visit</label>
+                                        <input 
+                                            type="time" 
+                                            value={logTime}
+                                            onChange={(e) => setLogTime(e.target.value)}
+                                            className="w-full p-4 text-4xl font-black text-center bg-gray-50 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition text-gray-800"
+                                        />
+                                    </div>
+
+                                    {/* VOLUME SLIDER */}
+                                    <div>
+                                        <div className="flex justify-between text-sm font-bold text-gray-700 mb-2">
+                                            <label>Volume</label>
+                                            <span className="text-blue-600">{volume === 1 ? 'Small' : volume === 2 ? 'Medium' : 'Large'}</span>
+                                        </div>
+                                        <input 
+                                            type="range" min="1" max="3" step="1" 
+                                            value={volume} onChange={(e) => setVolume(parseInt(e.target.value))}
+                                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                        />
+                                        <div className="flex justify-between text-xs text-gray-400 mt-2 px-1">
+                                            <span>Small</span><span>Med</span><span>Large</span>
+                                        </div>
+                                    </div>
+
+                                    {/* URGENCY SLIDER */}
+                                    <div>
+                                        <div className="flex justify-between text-sm font-bold text-gray-700 mb-2">
+                                            <label>Urgency Level</label>
+                                            <span className={urgency >= 4 ? 'text-red-600' : urgency === 3 ? 'text-orange-600' : 'text-green-600'}>
+                                                {urgency}/5
+                                            </span>
+                                        </div>
+                                        <input 
+                                            type="range" min="1" max="5" step="1" 
+                                            value={urgency} onChange={(e) => setUrgency(parseInt(e.target.value))}
+                                            className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${urgency >= 4 ? 'accent-red-500 bg-red-100' : urgency === 3 ? 'accent-orange-500 bg-orange-100' : 'accent-green-500 bg-green-100'}`}
+                                        />
+                                        <div className="flex justify-between text-xs text-gray-400 mt-2 px-1">
+                                            <span>Mild</span><span>Rush</span>
+                                        </div>
+                                    </div>
+
+                                    {/* TAGS */}
+                                    <div>
+                                        <label className="block text-sm font-bold text-gray-700 mb-3">Quick Tags</label>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <button 
+                                                onClick={() => setTags({...tags, dribble: !tags.dribble})}
+                                                className={`py-3 rounded-xl border text-sm font-bold flex flex-col items-center justify-center transition-colors ${tags.dribble ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-gray-50 border-gray-200 text-gray-500'}`}
+                                            >
+                                                <span className="text-xl mb-1">💧</span> Dribble
+                                            </button>
+                                            <button 
+                                                onClick={() => setTags({...tags, dribbleMarks: !tags.dribbleMarks})}
+                                                className={`py-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center transition-colors text-center px-1 ${tags.dribbleMarks ? 'bg-red-100 border-red-300 text-red-800' : 'bg-gray-50 border-gray-200 text-gray-500'}`}
+                                            >
+                                                <span className="text-xl mb-1">👖</span> Marks Clothes
+                                            </button>
+                                            <button 
+                                                onClick={() => setTags({...tags, massage: !tags.massage})}
+                                                className={`py-3 rounded-xl border text-sm font-bold flex flex-col items-center justify-center transition-colors ${tags.massage ? 'bg-purple-100 border-purple-300 text-purple-800' : 'bg-gray-50 border-gray-200 text-gray-500'}`}
+                                            >
+                                                <span className="text-xl mb-1">💆‍♂️</span> Massage
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <button 
+                                        onClick={saveLog}
+                                        className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 transition shadow-lg mt-4"
+                                    >
+                                        Save Log
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
