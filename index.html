@@ -29,6 +29,72 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // --- SWIPEABLE LOG COMPONENT ---
+        const SwipeableLog = ({ onDelete, children, bgClass }) => {
+            const [offset, setOffset] = useState(0);
+            const touchStartX = useRef(null);
+
+            const handleTouchStart = (e) => {
+                touchStartX.current = e.touches ? e.touches[0].clientX : e.clientX;
+            };
+
+            const handleTouchMove = (e) => {
+                if (touchStartX.current === null) return;
+                const currentX = e.touches ? e.touches[0].clientX : e.clientX;
+                const diff = currentX - touchStartX.current;
+                
+                // Only allow swiping left
+                if (diff < 0) {
+                    setOffset(Math.max(diff, -80)); // Max 80px swipe
+                } else {
+                    setOffset(0);
+                }
+            };
+
+            const handleTouchEnd = () => {
+                if (offset < -40) {
+                    setOffset(-80); // Snap open to show delete
+                } else {
+                    setOffset(0); // Snap closed
+                }
+                touchStartX.current = null;
+            };
+
+            return (
+                <div className="relative overflow-hidden rounded-xl w-full touch-pan-y mb-3 shadow-sm">
+                    {/* Background Delete Button */}
+                    <div className="absolute inset-0 bg-red-500 flex justify-end items-center">
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setOffset(0);
+                                onDelete();
+                            }} 
+                            className="text-white font-bold h-full px-6 flex items-center justify-center active:bg-red-600 transition-colors"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                    {/* Foreground Content */}
+                    <div 
+                        className={`relative w-full h-full transition-transform duration-200 ease-out ${bgClass}`}
+                        style={{ transform: `translateX(${offset}px)` }}
+                        onTouchStart={handleTouchStart}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={handleTouchEnd}
+                        onMouseDown={handleTouchStart}
+                        onMouseMove={(e) => {
+                            if (e.buttons === 1) handleTouchMove(e);
+                        }}
+                        onMouseUp={handleTouchEnd}
+                        onMouseLeave={handleTouchEnd}
+                    >
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+
         function App() {
             // --- STATE ---
             const [showSplash, setShowSplash] = useState(true);
@@ -50,7 +116,6 @@
 
             // --- INITIAL LOAD & SPLASH ---
             useEffect(() => {
-                // Load data from local storage
                 try {
                     const savedLogs = localStorage.getItem('tbb_logs');
                     if (savedLogs) {
@@ -82,12 +147,10 @@
                 let totalDiff = 0;
                 let validIntervals = 0;
                 
-                // Sort ascending for calculation
                 const sorted = [...logs].sort((a, b) => a.timestamp - b.timestamp);
                 
                 for (let i = 1; i < sorted.length; i++) {
                     const diffMs = sorted[i].timestamp - sorted[i-1].timestamp;
-                    // Ignore intervals longer than 10 hours (assuming overnight sleep)
                     if (diffMs < 10 * 60 * 60 * 1000) {
                         totalDiff += diffMs;
                         validIntervals++;
@@ -108,7 +171,7 @@
             // --- ACTIONS ---
             const openLogModal = () => {
                 const now = new Date();
-                const timeString = now.toTimeString().slice(0, 5); // Format as HH:mm
+                const timeString = now.toTimeString().slice(0, 5); 
                 
                 setLogTime(timeString);
                 setVolume(2);
@@ -122,18 +185,10 @@
                 const [hours, minutes] = logTime.split(':');
                 const dateObj = new Date(now.getFullYear(), now.getMonth(), now.getDate(), parseInt(hours), parseInt(minutes));
                 
-                const newLog = {
-                    id: Date.now(),
-                    timestamp: dateObj,
-                    volume,
-                    urgency,
-                    tags
-                };
-
+                const newLog = { id: Date.now(), timestamp: dateObj, volume, urgency, tags };
                 const currentAvg = getAverageInterval();
                 const sortedLogs = [...logs, newLog].sort((a, b) => b.timestamp - a.timestamp);
                 
-                // Check for celebration (if this interval beats average by 5 mins)
                 if (sortedLogs.length > 1 && sortedLogs[0].id === newLog.id) {
                     const newInterval = newLog.timestamp - sortedLogs[1].timestamp;
                     if (currentAvg > 0 && newInterval > (currentAvg + 300000) && newInterval < (10*60*60*1000)) {
@@ -151,6 +206,14 @@
                 setDrinkLogs(prev => [newDrink, ...prev].sort((a, b) => b.timestamp - a.timestamp));
                 setCelebrationMsg(`✅ ${type} logged!`);
                 setTimeout(() => setCelebrationMsg(''), 2000);
+            };
+
+            const handleDelete = (id, type) => {
+                if (type === 'drink') {
+                    setDrinkLogs(prev => prev.filter(d => d.id !== id));
+                } else {
+                    setLogs(prev => prev.filter(l => l.id !== id));
+                }
             };
 
             // --- DATA MANAGEMENT ---
@@ -171,12 +234,8 @@
                 reader.onload = (event) => {
                     try {
                         const parsed = JSON.parse(event.target.result);
-                        if (parsed.logs) {
-                            setLogs(parsed.logs.map(l => ({...l, timestamp: new Date(l.timestamp)})));
-                        }
-                        if (parsed.drinkLogs) {
-                            setDrinkLogs(parsed.drinkLogs.map(d => ({...d, timestamp: new Date(d.timestamp)})));
-                        }
+                        if (parsed.logs) setLogs(parsed.logs.map(l => ({...l, timestamp: new Date(l.timestamp)})));
+                        if (parsed.drinkLogs) setDrinkLogs(parsed.drinkLogs.map(d => ({...d, timestamp: new Date(d.timestamp)})));
                         alert("Data successfully restored!");
                     } catch (err) {
                         alert("Error restoring data. Make sure it's a valid backup file.");
@@ -185,8 +244,6 @@
                 reader.readAsText(file);
             };
 
-            // --- CALENDAR LOGIC ---
-            // Simple mock logic: audit every 14 days. 
             const daysUntilAudit = 14 - (new Date().getDate() % 14);
 
             // --- RENDERING ---
@@ -196,9 +253,12 @@
                         className="max-w-md mx-auto min-h-screen bg-blue-600 flex flex-col items-center justify-center text-white relative overflow-hidden dot-bg cursor-pointer"
                         onClick={() => setShowSplash(false)}
                     >
-                        <div className="text-7xl mb-6 animate-bounce">🚽🏃‍♂️💨</div>
+                        <div className="text-7xl mb-6 animate-bounce flex items-center justify-center gap-2">
+                            <span style={{ transform: 'scaleX(-1)', display: 'inline-block' }}>🚽</span>
+                            <span>🏃‍♂️💨</span>
+                        </div>
                         <h1 className="text-3xl font-black text-center mb-2 px-4 drop-shadow-md">Teacher Bladder<br/>Bootcamp</h1>
-                        <p className="text-blue-200 font-medium tracking-wide">Operation: Turing Trip</p>
+                        <p className="text-blue-200 font-medium tracking-wide">Operation Bladder Trainer</p>
                         <div className="mt-16 text-sm text-white/80 animate-pulse font-bold tracking-widest uppercase bg-white/20 px-6 py-3 rounded-full">Tap anywhere to start</div>
                     </div>
                 );
@@ -209,7 +269,7 @@
                     
                     {/* Celebration Toast */}
                     {celebrationMsg && (
-                        <div className="absolute top-4 left-4 right-4 z-50 bg-green-500 text-white font-bold px-4 py-3 rounded-xl shadow-lg transform transition-all flex items-center justify-center animate-pulse">
+                        <div className="absolute top-4 left-4 right-4 z-50 bg-green-500 text-white font-bold px-4 py-3 rounded-xl shadow-lg flex items-center justify-center animate-pulse">
                             {celebrationMsg}
                         </div>
                     )}
@@ -218,16 +278,21 @@
                     {isSidebarOpen && (
                         <div className="absolute inset-0 z-40 flex">
                             <div className="absolute inset-0 bg-black/50" onClick={() => setIsSidebarOpen(false)}></div>
-                            <div className="relative w-64 bg-white h-full shadow-2xl flex flex-col">
-                                <div className="p-6 bg-blue-600 text-white">
-                                    <h2 className="text-xl font-bold">Menu</h2>
-                                    <p className="text-blue-200 text-sm">{daysUntilAudit} days to next audit</p>
+                            <div className="relative w-64 bg-white h-full shadow-2xl flex flex-col z-50 slide-right">
+                                <div className="p-6 bg-blue-600 text-white flex justify-between items-start">
+                                    <div>
+                                        <h2 className="text-xl font-bold">Menu</h2>
+                                        <p className="text-blue-200 text-sm">{daysUntilAudit} days to next audit</p>
+                                    </div>
+                                    <button onClick={() => setIsSidebarOpen(false)} className="text-white/70 hover:text-white p-1">
+                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                    </button>
                                 </div>
                                 <div className="flex flex-col py-4 space-y-2 px-3 flex-1">
                                     {[
-                                        { id: 'logs', icon: '📝', label: 'Dashboard & Logs' },
+                                        { id: 'logs', icon: '📝', label: 'Dashboard' },
                                         { id: 'progress', icon: '📈', label: 'Progress & Data' },
-                                        { id: 'calendar', icon: '📅', label: 'Calendar & Alerts' }
+                                        { id: 'calendar', icon: '📅', label: 'Calendar' }
                                     ].map(tab => (
                                         <button 
                                             key={tab.id}
@@ -245,27 +310,26 @@
 
                     {/* HEADER */}
                     <header className="bg-white px-4 py-4 flex items-center justify-between shadow-sm z-10 sticky top-0">
-                        <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-gray-500 hover:text-blue-600">
+                        <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 text-gray-800 hover:bg-gray-100 rounded-lg">
                             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                         </button>
                         <h1 className="text-lg font-bold text-gray-800 tracking-tight">
                             {activeTab === 'logs' ? 'Dashboard' : activeTab === 'progress' ? 'Progress' : 'Calendar'}
                         </h1>
-                        <div className="w-8"></div> {/* Spacer for centering */}
+                        <div className="w-8"></div>
                     </header>
 
                     {/* MAIN CONTENT AREA */}
                     <main className="flex-1 overflow-y-auto p-4 pb-12 hide-scrollbar">
                         
-                        {/* --- LOGS TAB --- */}
                         {activeTab === 'logs' && (
                             <div className="space-y-6">
                                 <button 
                                     onClick={openLogModal}
-                                    className="w-full bg-blue-600 text-white py-5 rounded-2xl shadow-lg font-bold text-xl active:scale-95 transition flex items-center justify-center space-x-2"
+                                    className="w-full bg-blue-600 text-white py-5 rounded-2xl shadow-lg font-black text-xl active:scale-95 transition flex items-center justify-center space-x-3 border-b-4 border-blue-800"
                                 >
-                                    <span className="text-2xl">➕</span>
-                                    <span>Log New Visit</span>
+                                    <span className="text-2xl">🚽</span>
+                                    <span>Log Toilet Visit</span>
                                 </button>
 
                                 <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
@@ -292,13 +356,17 @@
                                 </div>
 
                                 <div>
-                                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4 px-1">Recent Activity</h3>
+                                    <div className="flex justify-between items-baseline mb-4 px-1">
+                                        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Recent Activity</h3>
+                                        <span className="text-[10px] text-gray-400 italic">Swipe left to delete</span>
+                                    </div>
+                                    
                                     {logs.length === 0 && drinkLogs.length === 0 ? (
                                         <div className="text-center py-10 bg-white rounded-xl border border-dashed border-gray-300 text-gray-400">
                                             No activity logged yet.
                                         </div>
                                     ) : (
-                                        <div className="space-y-3">
+                                        <div>
                                             {[
                                                 ...logs.map(l => ({ ...l, eventType: 'visit' })),
                                                 ...drinkLogs.map(d => ({ ...d, eventType: 'drink' }))
@@ -307,15 +375,21 @@
                                                 
                                                 if (event.eventType === 'drink') {
                                                     return (
-                                                        <div key={`drink-${event.id}`} className="bg-blue-50 p-3 rounded-xl shadow-sm border border-blue-100 flex justify-between items-center">
-                                                            <div className="flex items-center space-x-3">
-                                                                <div className="bg-white p-2 rounded-lg shadow-sm text-lg">
-                                                                    {event.type === 'Water' ? '💧' : event.type === 'Tea' ? '🫖' : event.type === 'Coffee' ? '☕' : event.type === 'Decaf' ? '🌿' : event.type === 'Moretti' ? '🍺' : '🥃'}
+                                                        <SwipeableLog 
+                                                            key={`drink-${event.id}`} 
+                                                            onDelete={() => handleDelete(event.id, 'drink')}
+                                                            bgClass="bg-blue-50 border-blue-100"
+                                                        >
+                                                            <div className="p-3 flex justify-between items-center border border-blue-100 rounded-xl h-full">
+                                                                <div className="flex items-center space-x-3">
+                                                                    <div className="bg-white p-2 rounded-lg shadow-sm text-lg">
+                                                                        {event.type === 'Water' ? '💧' : event.type === 'Tea' ? '🫖' : event.type === 'Coffee' ? '☕' : event.type === 'Decaf' ? '🌿' : event.type === 'Moretti' ? '🍺' : '🥃'}
+                                                                    </div>
+                                                                    <span className="font-bold text-gray-700">{event.type}</span>
                                                                 </div>
-                                                                <span className="font-bold text-gray-700">{event.type}</span>
+                                                                <span className="text-sm font-medium text-gray-500">{timeStr}</span>
                                                             </div>
-                                                            <span className="text-sm font-medium text-gray-500">{timeStr}</span>
-                                                        </div>
+                                                        </SwipeableLog>
                                                     );
                                                 }
 
@@ -326,40 +400,46 @@
                                                 const interval = prevLog ? (event.timestamp - prevLog.timestamp) : null;
                                                 
                                                 return (
-                                                    <div key={`visit-${event.id}`} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div className="flex items-center space-x-2">
-                                                                <span className="text-xl">🚽</span>
-                                                                <div className="font-bold text-lg text-gray-800">{timeStr}</div>
+                                                    <SwipeableLog 
+                                                        key={`visit-${event.id}`} 
+                                                        onDelete={() => handleDelete(event.id, 'visit')}
+                                                        bgClass="bg-white border-gray-200"
+                                                    >
+                                                        <div className="p-4 flex flex-col border border-gray-200 rounded-xl h-full">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div className="flex items-center space-x-2">
+                                                                    <span className="text-xl">🚽</span>
+                                                                    <div className="font-bold text-lg text-gray-800">{timeStr}</div>
+                                                                </div>
+                                                                <div className="text-sm font-medium bg-gray-100 px-2 py-1 rounded text-gray-600">
+                                                                    {interval ? formatDuration(interval) : 'Initial'}
+                                                                </div>
                                                             </div>
-                                                            <div className="text-sm font-medium bg-gray-100 px-2 py-1 rounded text-gray-600">
-                                                                {interval ? formatDuration(interval) : 'Initial'}
+                                                            
+                                                            <div className="flex items-center space-x-4 text-sm mb-3 ml-7">
+                                                                <div className="flex items-center space-x-1">
+                                                                    <span className="text-gray-500">Urgency:</span>
+                                                                    <span className={`font-bold px-2 rounded ${event.urgency >= 4 ? 'text-red-600 bg-red-50' : event.urgency === 3 ? 'text-orange-600 bg-orange-50' : 'text-green-600 bg-green-50'}`}>
+                                                                        {event.urgency}/5
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center space-x-1">
+                                                                    <span className="text-gray-500">Vol:</span>
+                                                                    <span className="font-semibold text-gray-700">
+                                                                        {event.volume === 1 ? 'Small' : event.volume === 2 ? 'Med' : 'Large'}
+                                                                    </span>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                        
-                                                        <div className="flex items-center space-x-4 text-sm mb-3 ml-7">
-                                                            <div className="flex items-center space-x-1">
-                                                                <span className="text-gray-500">Urgency:</span>
-                                                                <span className={`font-bold px-2 rounded ${event.urgency >= 4 ? 'text-red-600 bg-red-50' : event.urgency === 3 ? 'text-orange-600 bg-orange-50' : 'text-green-600 bg-green-50'}`}>
-                                                                    {event.urgency}/5
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex items-center space-x-1">
-                                                                <span className="text-gray-500">Vol:</span>
-                                                                <span className="font-semibold text-gray-700">
-                                                                    {event.volume === 1 ? 'Small' : event.volume === 2 ? 'Med' : 'Large'}
-                                                                </span>
-                                                            </div>
-                                                        </div>
 
-                                                        {(event.tags.dribble || event.tags.dribbleMarks || event.tags.massage) && (
-                                                            <div className="flex flex-wrap gap-2 mt-1 pt-3 border-t border-gray-50 ml-7">
-                                                                {event.tags.dribble && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-md">💧 Dribble</span>}
-                                                                {event.tags.dribbleMarks && <span className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded-md">👖 Marks Clothing</span>}
-                                                                {event.tags.massage && <span className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded-md">💆‍♂️ Massage</span>}
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                            {(event.tags.dribble || event.tags.dribbleMarks || event.tags.massage) && (
+                                                                <div className="flex flex-wrap gap-2 mt-1 pt-3 border-t border-gray-50 ml-7">
+                                                                    {event.tags.dribble && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-md font-bold">💧 Dribble</span>}
+                                                                    {event.tags.dribbleMarks && <span className="text-xs bg-red-50 text-red-700 px-2 py-1 rounded-md font-bold">👖 Marks Clothes</span>}
+                                                                    {event.tags.massage && <span className="text-xs bg-purple-50 text-purple-700 px-2 py-1 rounded-md font-bold">💆‍♂️ Massage</span>}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </SwipeableLog>
                                                 )
                                             })}
                                         </div>
@@ -368,7 +448,6 @@
                             </div>
                         )}
 
-                        {/* --- PROGRESS TAB --- */}
                         {activeTab === 'progress' && (
                             <div className="space-y-6">
                                 <div className="grid grid-cols-2 gap-4">
@@ -387,8 +466,8 @@
                                     <p className="text-sm text-gray-500 mb-6">Your data is saved automatically on this device. Use these buttons to create backups or transfer to a new phone.</p>
                                     
                                     <div className="space-y-3">
-                                        <button onClick={exportData} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-xl flex items-center justify-center">
-                                            <span className="mr-2">💾</span> Download Backup
+                                        <button onClick={exportData} className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-xl flex items-center justify-center border border-gray-200">
+                                            <span className="mr-2">💾</span> Download Backup File
                                         </button>
                                         
                                         <div className="relative">
@@ -400,7 +479,7 @@
                                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                                             />
                                             <button className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded-xl flex items-center justify-center">
-                                                <span className="mr-2">📂</span> Restore Data
+                                                <span className="mr-2">📂</span> Restore From Backup
                                             </button>
                                         </div>
                                     </div>
@@ -408,23 +487,12 @@
                             </div>
                         )}
 
-                        {/* --- CALENDAR TAB --- */}
                         {activeTab === 'calendar' && (
                             <div className="space-y-6">
                                 <div className="bg-gradient-to-br from-blue-600 to-blue-800 p-6 rounded-2xl shadow-md text-white text-center">
                                     <p className="text-blue-200 font-medium mb-1 uppercase tracking-widest text-xs">Next Audit Window</p>
                                     <div className="text-6xl font-black mb-2">{daysUntilAudit}</div>
                                     <p className="text-lg font-bold">Days Remaining</p>
-                                </div>
-                                
-                                <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
-                                    <h3 className="font-bold text-gray-800 mb-2">How Audits Work</h3>
-                                    <p className="text-sm text-gray-600 mb-4">Tracking every day causes burnout. Instead, track every single visit for 3 consecutive days (Mon, Tue, Wed) every 2 weeks.</p>
-                                    <ul className="text-sm text-gray-600 space-y-2 list-disc pl-5">
-                                        <li>Reveals interval growth over time.</li>
-                                        <li>Highlights symptom changes.</li>
-                                        <li>Proves physical therapy results.</li>
-                                    </ul>
                                 </div>
                             </div>
                         )}
@@ -435,21 +503,21 @@
                         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center">
                             <div className="bg-white w-full max-w-md p-6 rounded-t-3xl sm:rounded-3xl max-h-[90vh] overflow-y-auto slide-up">
                                 <div className="flex justify-between items-center mb-6">
-                                    <h2 className="text-xl font-black text-gray-800">Log Visit</h2>
+                                    <h2 className="text-xl font-black text-gray-800">Log Toilet Visit</h2>
                                     <button onClick={() => setShowLogModal(false)} className="text-gray-400 bg-gray-100 rounded-full p-2 hover:bg-gray-200">
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                     </button>
                                 </div>
 
                                 <div className="space-y-6">
-                                    {/* TIME ADJUSTER */}
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-2">Time of Visit</label>
+                                    {/* PROMINENT TIME ADJUSTER */}
+                                    <div className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-100">
+                                        <label className="block text-sm font-bold text-gray-500 uppercase tracking-wider mb-2 text-center">Time of Visit</label>
                                         <input 
                                             type="time" 
                                             value={logTime}
                                             onChange={(e) => setLogTime(e.target.value)}
-                                            className="w-full p-4 text-4xl font-black text-center bg-gray-50 border-2 border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition text-gray-800"
+                                            className="w-full text-5xl font-black text-center bg-transparent outline-none text-gray-800 cursor-pointer"
                                         />
                                     </div>
 
@@ -514,7 +582,7 @@
 
                                     <button 
                                         onClick={saveLog}
-                                        className="w-full bg-gray-900 text-white py-4 rounded-xl font-bold text-lg active:scale-95 transition shadow-lg mt-4"
+                                        className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-lg active:scale-95 transition shadow-lg mt-4 border-b-4 border-blue-800"
                                     >
                                         Save Log
                                     </button>
